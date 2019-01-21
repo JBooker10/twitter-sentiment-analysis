@@ -7,6 +7,7 @@ import (
 	"github.com/dghubble/oauth1"
 )
 
+// TwitterAuthentication is a user defined type to enter Twitter Credentials
 type TwitterAuthentication struct {
 	ConsumerKey       string
 	ConsumerSecret    string
