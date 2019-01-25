@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/cdipaolo/sentiment"
@@ -12,6 +15,17 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
 )
+
+type UserTweets struct {
+	CreatedAt  string
+	Name       string
+	ScreenName string
+	Location   string
+	Verified   bool
+	Text       string
+	Retweets   int
+	Favorites  int
+}
 
 // SearchTweets - Searches All Tweets
 func SearchTweets(w http.ResponseWriter, r *http.Request) {
@@ -31,15 +45,31 @@ func SearchTweets(w http.ResponseWriter, r *http.Request) {
 	searchTweets := &twitter.SearchTweetParams{
 		Query:           searchkey,
 		ResultType:      "recent",
-		Count:           2,
-		IncludeEntities: twitter.Bool(true),
+		Count:           40,
+		IncludeEntities: twitter.Bool(false),
 	}
 
 	search, _, err := client.Search.Tweets(searchTweets)
 	if err != nil {
 		log.Fatal(err)
 	}
-	json.NewEncoder(w).Encode(search)
+
+	tweets := []*UserTweets{}
+
+	for _, tweet := range search.Statuses {
+		userTweet := new(UserTweets)
+		userTweet.CreatedAt = tweet.CreatedAt
+		userTweet.Name = tweet.User.Name
+		userTweet.Text = tweet.Text
+		userTweet.Location = tweet.User.Location
+		userTweet.ScreenName = tweet.User.ScreenName
+		userTweet.Verified = tweet.User.Verified
+		userTweet.Retweets = tweet.RetweetCount
+		userTweet.Favorites = tweet.FavoriteCount
+		tweets = append(tweets, userTweet)
+	}
+
+	json.NewEncoder(w).Encode(tweets)
 }
 
 // SearchUsers - Searches All Users
@@ -49,7 +79,7 @@ func SearchUsers(w http.ResponseWriter, r *http.Request) {
 	client := twitter.NewClient(httpClient)
 
 	vars := mux.Vars(r)
-	searchkey, ok := vars["query"]
+	searchkey, ok := vars["user"]
 	if !ok {
 		w.WriteHeader(400)
 		fmt.Fprint(w, `{"error": "No search keys found, you can either search}`)
@@ -76,13 +106,13 @@ func GetRecentTrends(w http.ResponseWriter, r *http.Request) {
 	client := twitter.NewClient(httpClient)
 
 	vars := mux.Vars(r)
-	searchkey, ok := vars["query"]
+	searchkey, ok := vars["woeid"]
 
 	fmt.Println(searchkey)
 
 	if !ok {
 		w.WriteHeader(400)
-		fmt.Fprint(w, `{"error": "No search keys found, you can either search}`)
+		fmt.Fprint(w, `{"error": "The Location of the recent trend couldn't be found}`)
 		return
 	}
 
@@ -102,16 +132,20 @@ type UserTimeline struct {
 	ID              string
 	Name            string
 	ScreenName      string
-	ProfileImageURL string
+	Verified        bool
+	ProfileImage    string
 	CreatedAt       string
 	Location        string
 	Text            string
-	RetweetCount    int
-	FavoriteCount   int
+	TotalTweets     int
+	Followers       int
+	Retweets        int
+	Favorites       int
 	SentimentRating uint8
 }
 
 // GetUserTimeline returns the most recent tweets of a given user with Sentiment Analysis
+// @build queries for API
 func GetUserTimeline(w http.ResponseWriter, r *http.Request) {
 	auth := TwitterAuth()
 	httpClient, _ := auth.Configuration()
@@ -123,7 +157,7 @@ func GetUserTimeline(w http.ResponseWriter, r *http.Request) {
 	}
 
 	vars := mux.Vars(r)
-	searchkey, ok := vars["query"]
+	searchkey, ok := vars["name"]
 	if !ok {
 		w.WriteHeader(400)
 		fmt.Fprint(w, `{"error": "No search keys found, you can either search}`)
@@ -131,8 +165,9 @@ func GetUserTimeline(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userTimeline := &twitter.UserTimelineParams{
-		Count:      10,
-		ScreenName: searchkey,
+		// Count:           10,
+		ScreenName:      searchkey,
+		IncludeRetweets: twitter.Bool(false),
 	}
 
 	timeline, _, err := client.Timelines.UserTimeline(userTimeline)
@@ -142,25 +177,59 @@ func GetUserTimeline(w http.ResponseWriter, r *http.Request) {
 
 	tweets := []*UserTimeline{}
 
-	// fmt.Println(timeline)
-	for _, tweet := range timeline { // 0
+	for _, tweet := range timeline {
 		userTweet := new(UserTimeline)
 		userTweet.ID = tweet.IDStr
 		userTweet.Name = tweet.User.Name
 		userTweet.ScreenName = tweet.User.ScreenName
+		userTweet.Verified = tweet.User.Verified
 		userTweet.CreatedAt = tweet.CreatedAt
 		userTweet.Location = tweet.User.Location
 		userTweet.Text = tweet.Text
-		userTweet.RetweetCount = tweet.RetweetCount
-		userTweet.FavoriteCount = tweet.FavoriteCount
-		userTweet.ProfileImageURL = tweet.User.ProfileImageURL
+		userTweet.TotalTweets = tweet.User.StatusesCount
+		userTweet.Retweets = tweet.RetweetCount
+		userTweet.Favorites = tweet.FavoriteCount
+		userTweet.Followers = tweet.User.FollowersCount
+		userTweet.ProfileImage = tweet.User.ProfileImageURL
 		userTweet.SentimentRating = model.SentimentAnalysis(tweet.Text, sentiment.English).Score
 		tweets = append(tweets, userTweet)
 	}
 
-	// fmt.Printf("%+v\n", &tweets)
-
 	json.NewEncoder(w).Encode(tweets)
+}
+
+func StreamUserTweets(w http.ResponseWriter, r *http.Request) {
+	auth := TwitterAuth()
+	httpClient, _ := auth.Configuration()
+	client := twitter.NewClient(httpClient)
+
+	// Demux demultiplexed stream messages
+	demux := twitter.NewSwitchDemux()
+	demux.Tweet = func(tweet *twitter.Tweet) {
+		// json.NewEncoder(w).Encode(tweet.Text)
+		fmt.Println(tweet.Text)
+		// fmt.Println(tweet.Text)
+	}
+	fmt.Println("Starting Sream...")
+
+	filterParams := &twitter.StreamFilterParams{
+		Track:         []string{"Trump"},
+		StallWarnings: twitter.Bool(true),
+	}
+
+	stream, err := client.Streams.Filter(filterParams)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	go demux.HandleChan(stream.Messages)
+
+	ch := make(chan os.Signal)
+	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
+	log.Println(<-ch)
+
+	fmt.Println("Stopping Stream...")
+	stream.Stop()
 }
 
 func main() {
@@ -170,9 +239,10 @@ func main() {
 	}
 	r := mux.NewRouter()
 	r.HandleFunc("/search-tweets/{query}", SearchTweets).Methods("GET")
-	r.HandleFunc("/search-users/{query}", SearchUsers).Methods("GET")
-	r.HandleFunc("/show-trends/{query}", GetRecentTrends).Methods("GET")
-	r.HandleFunc("/show-timeline/{query}", GetUserTimeline).Methods("GET")
+	r.HandleFunc("/users/{user}", SearchUsers).Methods("GET")
+	r.HandleFunc("/trends/{woeid}", GetRecentTrends).Methods("GET")
+	r.HandleFunc("/timeline/{name}", GetUserTimeline).Methods("GET")
+	// r.HandleFunc("/stream", StreamUserTweets).Methods("GET")
 
 	srv := &http.Server{
 		Handler:      r,
