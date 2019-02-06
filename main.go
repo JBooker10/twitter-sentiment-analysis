@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -15,17 +16,6 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
 )
-
-type UserTweets struct {
-	CreatedAt  string
-	Name       string
-	ScreenName string
-	Location   string
-	Verified   bool
-	Text       string
-	Retweets   int
-	Favorites  int
-}
 
 // SearchTweets - Searches All Tweets
 func SearchTweets(w http.ResponseWriter, r *http.Request) {
@@ -110,6 +100,10 @@ func GetRecentTrends(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Println(searchkey)
 
+	f, err := strconv.ParseInt(searchkey, 10, 64)
+
+	fmt.Println(f)
+
 	if !ok {
 		w.WriteHeader(400)
 		fmt.Fprint(w, `{"error": "The Location of the recent trend couldn't be found}`)
@@ -117,31 +111,27 @@ func GetRecentTrends(w http.ResponseWriter, r *http.Request) {
 	}
 
 	places := &twitter.TrendsPlaceParams{
-		WOEID: 1,
+		WOEID: f,
 	}
 
-	trend, _, err := client.Trends.Place(1, places)
+	trend, _, err := client.Trends.Place(f, places)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	json.NewEncoder(w).Encode(trend)
-}
+	trends := []*CurrentTrends{}
 
-type UserTimeline struct {
-	ID              string
-	Name            string
-	ScreenName      string
-	Verified        bool
-	ProfileImage    string
-	CreatedAt       string
-	Location        string
-	Text            string
-	TotalTweets     int
-	Followers       int
-	Retweets        int
-	Favorites       int
-	SentimentRating uint8
+	for _, tweet := range trend {
+
+		for _, currentTrend := range tweet.Trends {
+			userTrends := new(CurrentTrends)
+			userTrends.Name = currentTrend.Name
+			userTrends.Volume = currentTrend.TweetVolume
+			trends = append(trends, userTrends)
+		}
+	}
+
+	json.NewEncoder(w).Encode(trends)
 }
 
 // GetUserTimeline returns the most recent tweets of a given user with Sentiment Analysis
