@@ -19,7 +19,7 @@ func main() {
 	r.HandleFunc("/users/{user}", SearchUsers).Methods("GET")
 	r.HandleFunc("/trends/{woeid}", GetRecentTrends).Methods("GET")
 	r.HandleFunc("/timeline/{name}", GetUserTimeline).Methods("GET")
-	// r.HandleFunc("/stream", StreamUserTweets).Methods("GET")
+	r.HandleFunc("/stream/{query}", StreamUserTweets).Methods("GET")
 
 	srv := &http.Server{
 		Handler:      r,

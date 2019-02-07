@@ -100,8 +100,6 @@ func GetRecentTrends(w http.ResponseWriter, r *http.Request) {
 
 	f, err := strconv.ParseInt(searchkey, 10, 64)
 
-	fmt.Println(f)
-
 	if !ok {
 		w.WriteHeader(400)
 		fmt.Fprint(w, `{"error": "The Location of the recent trend couldn't be found}`)
@@ -191,6 +189,14 @@ func StreamUserTweets(w http.ResponseWriter, r *http.Request) {
 	httpClient, _ := auth.Configuration()
 	client := twitter.NewClient(httpClient)
 
+	vars := mux.Vars(r)
+	searchkey, ok := vars["query"]
+	if !ok {
+		w.WriteHeader(400)
+		fmt.Fprint(w, `{"error": "No search keys found, you can either search}`)
+		return
+	}
+
 	// Demux demultiplexed stream messages
 	demux := twitter.NewSwitchDemux()
 	demux.Tweet = func(tweet *twitter.Tweet) {
@@ -201,7 +207,7 @@ func StreamUserTweets(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("Starting Sream...")
 
 	filterParams := &twitter.StreamFilterParams{
-		Track:         []string{"Trump"},
+		Track:         []string{searchkey},
 		StallWarnings: twitter.Bool(true),
 	}
 
