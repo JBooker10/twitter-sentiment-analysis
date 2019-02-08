@@ -17,10 +17,14 @@ import (
 
 // SearchTweets - Searches All Tweets
 func SearchTweets(w http.ResponseWriter, r *http.Request) {
-
 	auth := TwitterAuth()
 	httpClient, _ := auth.Configuration()
 	client := twitter.NewClient(httpClient)
+
+	model, err := sentiment.Restore()
+	if err != nil {
+		panic(fmt.Sprintf("Could not restore model!\n\t%v\n", err))
+	}
 
 	vars := mux.Vars(r)
 	searchkey, ok := vars["query"]
@@ -33,6 +37,7 @@ func SearchTweets(w http.ResponseWriter, r *http.Request) {
 	searchTweets := &twitter.SearchTweetParams{
 		Query:           searchkey,
 		ResultType:      "recent",
+		Lang:            "en",
 		Count:           40,
 		IncludeEntities: twitter.Bool(false),
 	}
@@ -48,12 +53,14 @@ func SearchTweets(w http.ResponseWriter, r *http.Request) {
 		userTweet := new(UserTweets)
 		userTweet.CreatedAt = tweet.CreatedAt
 		userTweet.Name = tweet.User.Name
+		userTweet.ProfileImage = tweet.User.ProfileImageURL
 		userTweet.Text = tweet.Text
 		userTweet.Location = tweet.User.Location
 		userTweet.ScreenName = tweet.User.ScreenName
 		userTweet.Verified = tweet.User.Verified
 		userTweet.Retweets = tweet.RetweetCount
 		userTweet.Favorites = tweet.FavoriteCount
+		userTweet.SentimentRating = model.SentimentAnalysis(tweet.Text, sentiment.English).Score
 		tweets = append(tweets, userTweet)
 	}
 
